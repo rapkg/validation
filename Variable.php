@@ -22,17 +22,17 @@ class Variable
         'array' => 'The :attribute must be an array.',
 
         'max' => [
-            'numeric' => 'The :attribute may not be greater than :max.',
+            'integer' => 'The :attribute may not be greater than :max.',
             'string'  => 'The :attribute may not be greater than :max characters.',
             'array'   => 'The :attribute may not have more than :max items.',
         ],
         'min' => [
-            'numeric' => 'The :attribute must be at least :min.',
+            'integer' => 'The :attribute must be at least :min.',
             'string'  => 'The :attribute must be at least :min characters.',
             'array'   => 'The :attribute must have at least :min items.',
         ],
         'between' => [
-            'numeric' => 'The :attribute must be between :min and :max.',
+            'integer' => 'The :attribute must be between :min and :max.',
             'string'  => 'The :attribute must be between :min and :max characters.',
             'array'   => 'The :attribute must have between :min and :max items.',
         ],
@@ -40,7 +40,7 @@ class Variable
         'contain' => 'The :attribute field must contain phrase \':phrase\'',
         'no_space' => 'The :attribute field must not contain white space',
         'size' => [
-            'numeric' => 'The :attribute must be :size.',
+            'integer' => 'The :attribute must be :size.',
             'string'  => 'The :attribute must be :size characters.',
             'array'   => 'The :attribute must contain :size items.',
         ],
@@ -54,7 +54,7 @@ class Variable
         'regex' => 'The :attribute format is invalid.',
     ];
 
-    public static function getDefaultRuleMessage()
+    public static function getDefaultRuleMessages()
     {
         return self::$defaultRuleMessages;
     }

@@ -11,28 +11,146 @@ namespace Rapkg\Validation;
 
 class Validator
 {
-    private $data;
+    /**
+     * The data under validation.
+     *
+     * @var array
+     */
+    protected $data;
 
-    private $rules;
+    /**
+     * The rules to be applied to the data.
+     *
+     * @var array
+     */
+    protected $rules;
 
-    private $message;
+    /**
+     * The interface to retrieve array of global messages.
+     *
+     * @var MessageInterface
+     */
+    protected static $globalMessage;
 
-    public function __construct($data, $rules)
+    /**
+     * The array of rule messages.
+     *
+     * @var array
+     */
+    protected $ruleMessages = [];
+
+    /**
+     * The array of custom error messages.
+     *
+     * @var array
+     */
+    protected $customMessages = [];
+
+    /**
+     * The array of custom attribute names.
+     *
+     * @var array
+     */
+    protected $attributes = [];
+
+    /**
+     * The last error message
+     *
+     * @var string
+     */
+    protected $message;
+
+    /**
+     * Create a new Validator instance.
+     *
+     * @param array $data
+     * @param array $rules
+     * @param array $customMessages
+     * @param array $attributes
+     */
+    public function __construct(array $data, array $rules, array $customMessages = [], array $attributes = [])
     {
         $this->data = $data;
         $this->rules = $this->explodeRules($rules);
+        $this->mergeMessages($customMessages, $attributes);
     }
 
-    public static function make($data, $rules)
+    /**
+     * Merge rule messages & custom message & attributes
+     *
+     * @param array $customMessages
+     * @param array $attributes
+     */
+    protected function mergeMessages(array $customMessages = [], array $attributes = [])
     {
-        return new Validator($data, $rules);
+        $globalMessage = [];
+        if (self::$globalMessage instanceof MessageInterface) {
+            $globalMessage = self::$globalMessage->getMessages();
+        }
+
+        // Merge rule messages
+        $ruleMessages = Variable::getDefaultRuleMessages();
+        if (isset($globalMessage['rule_messages']) && is_array($globalMessage['rule_messages'])) {
+            $ruleMessages = array_merge($ruleMessages, $globalMessage['rule_messages']);
+        }
+        $this->ruleMessages = $ruleMessages;
+
+        // Merge custom messages
+        if (isset($globalMessage['custom_messages']) && is_array($globalMessage['custom_messages'])) {
+            $this->customMessages = $globalMessage['custom_messages'];
+        }
+        if ($customMessages && is_array($customMessages)) {
+            $this->customMessages = array_merge($this->customMessages, $customMessages);
+        }
+
+        // Merge attributes
+        if (isset($globalMessage['attributes']) && is_array($globalMessage['attributes'])) {
+            $this->attributes = $globalMessage['attributes'];
+        }
+        if ($attributes && is_array($attributes)) {
+            $this->attributes = array_merge($this->attributes, $attributes);
+        }
     }
 
+    /**
+     * Create a new Validator instance.
+     *
+     * @param array $data
+     * @param array $rules
+     * @param array $customMessages
+     * @param array $attributes
+     * @return Validator
+     */
+    public static function make(array $data, array $rules, array $customMessages = [], array $attributes = [])
+    {
+        return new Validator($data, $rules, $customMessages, $attributes);
+    }
+
+    /**
+     * Set global message instance
+     *
+     * @param MessageInterface $globalMessage
+     */
+    public static function setGlobalMessage(MessageInterface $globalMessage)
+    {
+        self::$globalMessage = $globalMessage;
+    }
+
+    /**
+     * Determine if the data fails the validation rules.
+     *
+     * @return bool
+     */
     public function fails()
     {
         return !$this->passes();
     }
 
+    /**
+     * Determine if the data passes the validation rules.
+     *
+     * @return bool
+     */
     public function passes()
     {
         $this->message = null;
@@ -47,12 +165,24 @@ class Validator
         return true;
     }
 
+    /**
+     * Retrieve the last error message
+     *
+     * @return string
+     */
     public function getMessage()
     {
         return $this->message;
     }
 
-    private function validate($attribute, $rule)
+    /**
+     * Validate a given attribute against a rule.
+     *
+     * @param $attribute
+     * @param $rule
+     * @return bool
+     */
+    protected function validate($attribute, $rule)
     {
         list($rule, $parameters) = $this->parseRule($rule);
 
@@ -63,13 +193,55 @@ class Validator
             return true;
         }
         if (!$this->$method($attribute, $value, $parameters)) {
-            // TODO: set message
+            if (in_array($rule, ['max', 'min', 'size', 'between'])) {
+                $message = $this->ruleMessages[$rule][$this->getType($value)];
+            } else {
+                $message = $this->ruleMessages[$rule];
+            }
+
+            if (isset($this->customMessages[$attribute])) {
+                $customMessage = $this->customMessages[$attribute];
+                if (is_array($customMessage) && isset($customMessage[$rule])) {
+                    $message = $customMessage[$rule];
+                } else if (is_string($customMessage)){
+                    $message = $customMessage;
+                }
+            }
+
+            if ($rule == 'size') {
+                $message = str_replace(':size', $parameters[0], $message);
+            } else if ($rule == 'max') {
+                $message = str_replace(':max', $parameters[0], $message);
+            } else if ($rule == 'min') {
+                $message = str_replace(':min', $parameters[0], $message);
+            } else if ($rule == 'between') {
+                $message = strtr($message, [':min' => $parameters[0], ':max' => $parameters[1]]);
+            } else if ($rule == 'in') {
+                $message = str_replace(':values', $parameters[0], $message);
+            } else if ($rule == 'contain') {
+                $message = str_replace(':phrase', $parameters[0], $message);
+            } else if ($rule == 'date_format') {
+                $message = str_replace(':date_format', $parameters[0], $message);
+            }
+
+            if (isset($this->attributes[$attribute])) {
+                $attribute = $this->attributes[$attribute];
+            }
+            $message = str_replace(':attribute', $attribute, $message);
+            $this->message = $message;
+
             return false;
         }
 
         return true;
     }
 
+    /**
+     * Extract the rule name and parameters from a rule.
+     *
+     * @param string $rule
+     * @return array
+     */
     private function parseRule($rule)
     {
         $parameters = [];
@@ -77,9 +249,6 @@ class Validator
         if (strpos($rule, ':') !== false) {
             list($rule, $parameter) = explode(':', $rule, 2);
             $parameters = $this->parseParameters($rule, $parameter);
-        }
-        if (!isset($this->validateMessages[$rule])) {
-            throw new \InvalidArgumentException('Invalid validator rule: ' . $rule);
         }
 
         return [$rule, $parameters];
@@ -100,7 +269,14 @@ class Validator
         return $rules;
     }
 
-    private function parseParameters($rule, $parameter)
+    /**
+     * Parse a parameter list.
+     *
+     * @param string $rule
+     * @param string $parameter
+     * @return array
+     */
+    protected function parseParameters($rule, $parameter)
     {
         if (strtolower($rule) == 'regex') {
             return [$parameter];
@@ -109,12 +285,18 @@ class Validator
         return str_getcsv($parameter);
     }
 
-    private function getValue($attribute)
+    /**
+     * Get the value of a given attribute.
+     *
+     * @param string $attribute
+     * @return mixed
+     */
+    protected function getValue($attribute)
     {
         return $this->data[$attribute];
     }
 
-    private function validateRequired($attribute, $value)
+    protected function validateRequired($attribute, $value)
     {
         if (is_null($value)) {
             return false;
@@ -127,56 +309,56 @@ class Validator
         return true;
     }
 
-    private function validateInteger($attribute, $value)
+    protected function validateInteger($attribute, $value)
     {
         return is_integer($value);
     }
 
-    private function validateBoolean($attribute, $value)
+    protected function validateBoolean($attribute, $value)
     {
         return is_bool($value);
     }
 
-    private function validateString($attribute, $value)
+    protected function validateString($attribute, $value)
     {
         return is_string($value);
     }
 
-    private function validateNumeric($attribute, $value)
+    protected function validateNumeric($attribute, $value)
     {
         return is_numeric($value);
     }
 
-    private function validateAlphaNum($attribute, $value)
+    protected function validateAlphaNum($attribute, $value)
     {
         return preg_match('/^[0-9a-zA-Z]+$/', $value);
     }
 
-    private function validateFloat($attribute, $value)
+    protected function validateFloat($attribute, $value)
     {
         return is_float($value);
     }
 
-    private function validateArray($attribute, $value)
+    protected function validateArray($attribute, $value)
     {
         return is_array($value);
     }
 
-    private function validateMax($attribute, $value, $parameters)
+    protected function validateMax($attribute, $value, $parameters)
     {
         $this->requireParameterCount(1, $parameters, 'max');
 
         return $this->getSize($attribute, $value) <= $parameters[0];
     }
 
-    private function validateMin($attribute, $value, $parameters)
+    protected function validateMin($attribute, $value, $parameters)
     {
         $this->requireParameterCount(1, $parameters, 'min');
 
         return $this->getSize($attribute, $value) >= $parameters[0];
     }
 
-    private function validateBetween($attribute, $value, $parameters)
+    protected function validateBetween($attribute, $value, $parameters)
     {
         $this->requireParameterCount(2, $parameters, 'between');
 
@@ -185,37 +367,37 @@ class Validator
         return $size >= $parameters[0] && $size <= $parameters[1];
     }
 
-    private function validateIn($attribute, $value, $parameters)
+    protected function validateIn($attribute, $value, $parameters)
     {
         $this->requireParameterCount(1, $parameters, 'in');
 
         return in_array($value, $parameters);
     }
 
-    private function validateContain($attribute, $value, $parameters)
+    protected function validateContain($attribute, $value, $parameters)
     {
         $this->requireParameterCount(1, $parameters, 'contain');
 
         return strpos($value, $parameters[0]) !== false;
     }
 
-    private function validateNoSpace($attribute, $value)
+    protected function validateNoSpace($attribute, $value)
     {
         return strpos($value, ' ') === false;
     }
 
-    private function validateSize($attribute, $value, $parameters)
+    protected function validateSize($attribute, $value, $parameters)
     {
         $size = $this->getSize($attribute, $value);
         return $size == $parameters[0];
     }
 
-    private function validateIp($attribute, $value)
+    protected function validateIp($attribute, $value)
     {
         return filter_var($value, FILTER_VALIDATE_IP) !== false;
     }
 
-    private function validateEmail($attribute, $value)
+    protected function validateEmail($attribute, $value)
     {
         if (preg_match(
             '/^[a-zA-Z0-9]+([_\-.][a-zA-Z0-9]+)*@[a-zA-Z0-9]+([-.][a-zA-Z0-9]+)*\.[a-zA-Z0-9]+([-.][a-zA-Z0-9]+)*$/',
@@ -227,7 +409,7 @@ class Validator
         return false;
     }
 
-    private function validateMobile($attribute, $value)
+    protected function validateMobile($attribute, $value)
     {
         if (preg_match('/^1[34578]\d{9}$/', $value)) {
             return true;
@@ -235,7 +417,7 @@ class Validator
         return false;
     }
 
-    private function validateIdNumber($attribute, $value)
+    protected function validateIdNumber($attribute, $value)
     {
         $pattern = "/^([1-6][0-9]{5})([1][9]|[2][0])[0-9]{2}([0][1-9]|[1][0-2])([0][1-9]|([1]|[2])[0-9]|[3][0-1])[0-9]{3}[0-9xX]$/";
         if (preg_match($pattern, $value)) {
@@ -252,7 +434,7 @@ class Validator
      * @param  array   $parameters
      * @return bool
      */
-    private function validateDateFormat($attribute, $value, $parameters)
+    protected function validateDateFormat($attribute, $value, $parameters)
     {
         $this->requireParameterCount(1, $parameters, 'date_format');
 
@@ -269,7 +451,7 @@ class Validator
      * @param  array   $parameters
      * @return bool
      */
-    private function validateRegex($attribute, $value, $parameters)
+    protected function validateRegex($attribute, $value, $parameters)
     {
         if (! is_string($value) && ! is_numeric($value)) {
             return false;
@@ -280,14 +462,14 @@ class Validator
         return preg_match($parameters[0], $value);
     }
 
-    private function requireParameterCount($count, $parameters, $rule)
+    protected function requireParameterCount($count, $parameters, $rule)
     {
         if (count($parameters) < $count) {
             throw new \InvalidArgumentException("Validation rule $rule requires at least $count parameters");
         }
     }
 
-    private function getSize($attribute, $value)
+    protected function getSize($attribute, $value)
     {
         if (is_integer($value)) {
             return $value;
@@ -297,6 +479,19 @@ class Validator
 
         return mb_strlen($value, 'UTF-8');
     }
+
+    protected function getType($value)
+    {
+        if (is_integer($value)) {
+            return 'integer';
+        } elseif (is_array($value)) {
+            return 'array';
+        }
+
+        return 'string';
+    }
+
+
 
     /**
      * The cache of studly-cased words.
